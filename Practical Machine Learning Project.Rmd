@@ -1,0 +1,512 @@
+---
+title: "Practical Machine Learning Project"
+author: "Alex Looi"
+date: "21 August 2015"
+output: html_document
+---
+
+### 1. Introduction
+
+Six young healthy participants were asked to perform one set of 10 repetitions of
+the Unilateral Dumbbell Biceps Curl in five different fashions:
+
+1) exactly according to the specification (Class A),
+2) throwing the elbows to the front (Class B),
+3) lifting the dumbbell only halfway (Class C),
+4) lowering the dumbbell only halfway (Class D)
+5) and throwing the hips to the front (Class E).
+
+
+Class A corresponds to the correct execution of the exercise, while the other 4
+classes correspond to common mistakes.
+
+Data of the above activities will be collected from accelerometers on the belt,
+forearm, arm, and dumbell for each of the 6 participants.
+
+&nbsp;
+
+### 2. Requirement
+
+The goal of your project is to predict the manner in which they did the exercise.
+This is the "classe" variable in the training set using any of the other variables.
+
+You should create a report describing:
+
+1) how you built your model,
+2) how you used cross validation,
+3) what you think the expected out of sample error is,and why you made the choices
+you did.
+4) use your prediction model to predict 20 different test cases.
+
+&nbsp;
+
+### 3. Model Selection, Building, and Cross Validation
+
+&nbsp;
+
+#### Model Selection
+
+Since we are predicting 5 different outcomes (classe A - E) with a set of
+predictors, the model chosen will perform **classification**. In this project,
+2 classification models were evaluated:
+
+1) Recursive Partitioning and Regression Trees (Method **"rpart"** in caret package)
+2) Breiman and Cutler's random forests for classification and regression
+(Method **"rf"** in caret package).
+
+&nbsp;
+
+#### Model Building & Cross-validation Technique
+
+Before building the model, the data set undergoes a "cleaning" process as follows:
+
+1) Each variable is first checked to see if more than 95% of its content are
+invalid (eg NAs, blanks). If more than 95% are invalid, then that variable will
+be discarded, since it is likely that it will not affect the model much.
+
+2) Unrelevant variables, such as time stamp. time, user name, row index, etc..
+are then removed.
+
+3) The cleaned data are then split into training data set and test data set for
+**model building** and **cross validation**
+
+ 
+There are a few possible ways to build a model and perform cross validation.
+To train a model, the **Train** function in R is used. For Cross Validation,
+Random Subsampling using **createDataPartition** function in R is used to split
+the data.
+
+&nbsp;
+
+2 ways of splitting data are studied:
+
+1) The first method is to split the data set "pml-training.csv" into 2 subsets:
+75% of it into training data set, and 25% of it into testing data set. For each
+model (rpart and random forest). The training data set will be used to train the
+model and the testing data set will be used to evaluate the accuracy of the models.
+The model with the better average accuracy will be chosen as the final model.
+(Note that if the accuracies of both models are quite close, there will be a need
+to repeat the whole process a few times to get and compare the average accuracies
+between the 2 models). After the model has been selected, this process (including
+the spliting of data) will be repeated over and over again if necessary (say 10
+times) and the accuracy developed each time will be averaged to get the final
+model accuracy. The reason for taking averages of multiple accuracy is that the
+average accuracy will be a better estimation of the actual accuracy (Out-of-Sample
+accuracy/error) as compared to just one instance of the model accuracy.
+
+
+2) The second method is similar to the first, but instead of splitting the data
+set "pml-training.csv" in 2 subsets, the data set is split into 3 subsets:
+60% of it into training data set, 20% of it into validation data set, 20% of it
+into testing data set. The training and validation data set will undergoes the
+same process as per method 1 to determine which is a better model. However,
+after selecting the final model, there is no need to repeat the model
+development again to calculate the average accuracy. The reason is because the
+testing data set (which is not used yet) will be use to check for the actual
+accuracy of the model, and it will be very representative of the actual accuracy
+(Out-of-Sample accuracy/error)
+
+&nbsp;
+
+The advantage of the first method is that the amount of data in the training
+data set is larger as compared to the second method. Larger data set allows
+a better model to be trained (developed). However, since the test data set is
+being reused over and over again during the model development, the estimated
+error will still be optimistic as compared to the actual Out-of-Sample error.
+
+
+For the second method, the training data set is smaller as compared to the
+first method. Therefore the quality of the model developed will be slightly
+inferior. However, since the test data set is only used once to evaluate the
+accuracy of the final model, the error obtained will be a better reprentation
+of the actual Out-of-Sample error. **(Note that Out-of-Sample error = 1 -
+Out-of-Sample accuracy)**
+
+&nbsp;
+
+**For this project, method 2 is used since in my opinion, the data set is quite
+large (about 20,000 rows). All the parameters used in training the models are the
+default values**.
+
+**Note also that for data splitting and model training, each will have their own
+local set.seed() to ensure that each trained model can be reproduced.**
+
+
+```{r Initialization, warning=FALSE, message=FALSE, results='hide', eval=TRUE, echo=FALSE}
+
+# Initialization
+library(knitr) # include the knitr library.
+library(doParallel) # include the doParallel library.
+library(parallel) # include the parallel library.
+registerDoParallel(cores=detectCores()) # set parallel processing core number.
+library(caret) # include the caret library.
+library(rattle) # include the rattle library.
+library(rpart) # include the rpart library.
+library(randomForest) # include the randomForest library.
+library(ggplot2) # include ggplot2 library.
+setInternet2(use = TRUE) # to enable IE for downloading file from https.
+set.seed(4321) # setting global seed.
+```
+
+
+```{r Download_Data, eval = TRUE, echo=FALSE}
+
+# Getting Data
+
+URL_Train <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+Train_File <- "./data/pml-training.csv"
+
+URL_Test <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+Test_File <- "./data/pml-testing.csv"
+
+if (!file.exists("data")) dir.create("data") # creates a "data" directory
+
+# Check if file exist in the working directory. If it doesn't exist, download it.
+if (!file.exists(Train_File)){
+        # print("Downloading Training Data File (approx 12Mb) to you working directory.")
+        # print("It may take a couple of minutes.")
+        download.file(URL_Train, destfile = Train_File, mode = "wb")
+        Train_datedownloaded <- date()
+        # print("Download complete.")
+}
+
+if (!file.exists(Test_File)){
+        # print("Downloading Test Data File to you working directory.")
+        download.file(URL_Test, destfile = Test_File, mode = "wb")
+        Test_datedownloaded <- date()
+        # print("Download complete.")
+}
+
+# delete uncessary data from memory
+rm(URL_Train)
+rm(URL_Test)
+```
+
+
+```{r Read_Data, eval = TRUE, echo=FALSE}
+# Load Training and Testing Data. # Assign blanks as NA.
+Initial_Train <- read.csv(file = Train_File, na.strings = c("NA",""))
+Final_Test <- read.csv(file = Test_File, na.strings = c("NA",""))
+
+#write.csv(Final_Test,"./data/Final_Test_Check.csv",row.names = FALSE)
+
+# delete uncessary data from memory)
+rm(Train_File)
+rm(Test_File)
+```
+
+
+```{r Clean_Data, eval = TRUE, echo=FALSE}
+
+# Cleaning Data
+index <- numeric()
+length <- length(Initial_Train[,1])
+        
+for(cnt in 1:length(Initial_Train[1,])){
+
+        # check if number of NA greater than 95%
+        if(!(sum(is.na(Initial_Train[,cnt])) > 0.95*length)) 
+                index <- rbind(index,cnt)
+}
+
+Train_reduce <- Initial_Train[,index] # get the variables that has < 95% NAs
+Train_reduce <- Train_reduce[,c(-1:-7)]
+
+num_obs <- dim(Initial_Train)[1] # get the number of observations of intial data set
+num_var <- dim(Initial_Train)[2] # get the number of predictors of intial data set
+num_var_reduce <- dim(Train_reduce)[2] # get the number of predictors of reduced data set
+
+# delete uncessary data from memory.
+rm(Initial_Train)
+rm(index)
+rm(length)
+rm(cnt)
+#write.csv(Train_reduce,"./data/Train_reduce.csv",row.names = FALSE)
+```
+
+
+```{r Data_Split, eval = TRUE, echo=FALSE}
+
+# Create data partition: 60% training data, 20% validation data, 20% test data.
+split_seed1 <- 0505
+set.seed(split_seed1) # set local seed just before spliting data.
+inTrain <- createDataPartition(y=Train_reduce$classe, p=0.6, list=FALSE)
+Train <- Train_reduce[inTrain,]
+Temp <- Train_reduce[-inTrain,]
+
+split_seed2 <- 0808
+set.seed(split_seed2) # set local seed just before spliting data.
+inTrain <- createDataPartition(y=Temp$classe, p=0.5, list=FALSE)
+Test <- Temp[inTrain,]
+Validation <- Temp[-inTrain,]
+
+
+num_obs_Train <- dim(Train)[1] # get the number of observations of training data set
+num_obs_Val <- dim(Validation)[1] # get the number of observations of Validation data set
+num_obs_Test <- dim(Test)[1] # get the number of observations of testing data set
+
+# delete uncessary data from memory
+rm(Temp)
+rm(Train_reduce)
+
+#write.csv(Train,"./data/Train.csv",row.names = FALSE)
+```
+
+
+```{r Model_Build, eval = TRUE, echo=FALSE}
+
+#Model Training and Selection
+Train_nLoad <- 1 # 1 = train model, 0 = load model.
+
+if(Train_nLoad){
+        
+        #Model 1. Using rpart with no preProcessing.
+        rpart_seed <- 1001
+        set.seed(rpart_seed) # set local seed just before training model.
+        ModelFit1 <- train(classe~., data=Train, method="rpart")
+        
+        save(ModelFit1, file = "./data/ModelFit1.rda") # save model for later use.
+
+
+        #Model 2. Using random forest with no preProcessing.
+        rf_seed <- 2002
+        set.seed(rf_seed) # set local seed just before training model.
+        ModelFit2 <- train(classe~., data=Train, method="rf")
+
+        save(ModelFit2, file = "./data/ModelFit2.rda") # save model for later use.
+}else{
+        load("./data/ModelFit1.rda")
+        load("./data/ModelFit2.rda")
+}
+```
+
+
+```{r ConfusionMatrix, eval = TRUE, echo=FALSE}
+
+# Cross validation for model 1.
+cM1 <- confusionMatrix(predict(ModelFit1,Validation),Validation$classe)
+ModelFit1_Acc <- cM1$overall[1] # Get accuracy for Model 1
+
+
+# Cross validation for model 2.
+cM2 <- confusionMatrix(predict(ModelFit2,Validation),Validation$classe)
+ModelFit2_Acc <- cM2$overall[1] # Get accuracy for Model 2
+```
+
+
+&nbsp;
+
+### 4. Initial Model Evaluation and Cross Validation
+
+The initial training data set consist of **`r num_obs` of observations** with
+**`r num_var` predictor variables**. After cleaning the data set, the number of
+predictors was reduced to **`r num_var_reduce`**.
+
+As mentioned earlier, method 2 of splitting the data set was used. The reduced
+data set with **`r num_obs` of observations** was split into 3 subsets, which
+consist of training data set (60% - **`r num_obs_Train` of observations**),
+validation data set (20% - **`r num_obs_Val` of observations**), and testing
+data set (20% - **`r num_obs_Test` of observations**).
+
+Using Recursive Partitioning and Regression Trees **(rpart)**, and using the
+validation data set to cross validate the model, the **accuracy is
+`r round(ModelFit1_Acc,4)`**. And using Breiman and Cutler's random forests
+**(rf)**, the **accuracy is `r round(ModelFit2_Acc,4)`**. Since the difference
+is accuracies between the 2 model is large, there is no need to repeat the
+process to get the average accuracies. **Breiman and Cutler's random forests is
+chosen since its accuracy is higher.**
+
+&nbsp;
+
+The following graphs shows the random forest model Accuray and Kappa vs the
+number of mtry.
+
+&nbsp;
+
+```{r Accuracy_plot, fig.width=7, fig.height=5, eval = TRUE, echo=FALSE}
+
+# Creating data frame for plotting
+temp1 <- cbind(ModelFit2$results[1], ModelFit2$results[2],
+              type = colnames(ModelFit2$results[2]))
+colnames(temp1)[2] <- "Accuracy_Kappa"
+temp2 <- cbind(ModelFit2$results[1], ModelFit2$results[3],
+              type = colnames(ModelFit2$results[3]))
+colnames(temp2)[2] <- "Accuracy_Kappa"
+ModelFit2_Plot <- rbind(temp1, temp2)
+
+# Plotting Accuracy_Kappa vs mtry
+title <- "Accuracy/Kappa vs mtry" # assign plot title
+xlabel <- "mtry" # assign X label
+ylabel <- "Accuracy/Kappa" # assign y label
+g <- ggplot(ModelFit2_Plot, aes(x = mtry, y = Accuracy_Kappa, group = type, color = type))
+p <- g + geom_line(linetype = 1, size = 1) +
+        geom_point(size=5, shape=20, fill="white") +
+        labs(list(title = title, x = xlabel, y = ylabel))
+print(p)
+```
+
+**Figure 1: Accuracy/Kappa vs Number of Predictor Used (mtry)**
+
+&nbsp;
+
+From the graphs, we can see that the highest accuracy and kappa value occurs
+at the mtry value `r ModelFit2$finalModel$tuneValue$mtry`. (Note that
+these accuracies and kappas are the values calculated during the training of
+the model. It is NOT the accuracy and kappa when cross validated
+with the validation data set). **We can also see that the accuracy between the
+different values of mtry are more or less the same.**
+
+&nbsp;
+
+The graph below shows the Variable Importance Plot of the model:
+
+```{r VarImp_plot, eval = TRUE, echo=FALSE}
+varImpPlot(ModelFit2$finalModel, main="Variable Importance Plot")
+
+ImpSort <- sort(ModelFit2$finalModel$importance, decreasing=TRUE,
+                index.return=TRUE)
+Name_Imp1 <- rownames(ModelFit2$finalModel$importance)[ImpSort[[2]][1]]
+Name_Imp2 <- rownames(ModelFit2$finalModel$importance)[ImpSort[[2]][2]]
+Name_Imp3 <- rownames(ModelFit2$finalModel$importance)[ImpSort[[2]][3]]
+```
+
+**Figure 2: Variable Importance Plot**
+
+&nbsp;
+
+From the graph, it shows that the top 3 predictors that has the great Mean
+Decrease Gini value are **`r Name_Imp1`**, **`r Name_Imp2`** and
+**`r Name_Imp3`** . Higher Mean Decrease in Gini means that a particular
+predictor variable plays a greater role in partitioning the data into the
+defined classes. Also, it is likely that using the top 7 predictors may be
+sufficient to train a random forest model with a reasonable accuracy.
+
+&nbsp;
+
+It is interesting to compare the time used to train the models. **rpart** uses
+**`r ModelFit1$times$everything[3]` seconds (elapsed time)** while **rf** uses
+**`r ModelFit2$times$everything[3]` seconds (elapsed time)**. The time taken to
+train the model using random forest is very long. Therefore there is a need to
+fine tune the model to reduce the training time.
+
+
+```{r Model_FineTune, eval=TRUE, echo=FALSE}
+
+#Model 3 - Fine Tune. Using random forest with no preProcessing, mtry = 2
+Train_nLoad_M <- 1 # 1 = train model, 0 = load model.
+
+if(Train_nLoad_M){
+
+        rf_seed_m <- 8888
+        set.seed(rf_seed_m) # set local seed just before training model.
+        rfGrid <- data.frame(mtry = 2)
+        ModelFit3 <- train(classe~., data=Train, method="rf", tuneGrid = rfGrid)
+
+        save(ModelFit3, file = "./data/ModelFit3.rda") # save model for later use.
+}else{
+        load("./data/ModelFit3.rda")
+}
+
+# Cross validation for model 2_M.
+cM3 <- confusionMatrix(predict(ModelFit3,Validation),Validation$classe)
+ModelFit3_Acc <- cM3$overall[1] # Get accuracy for Model 3
+```
+
+&nbsp;
+
+### 5. Model Fine Tuning
+
+As the parameters used during model training are the default values, there may
+be a need to fine tune those parameters, either to increase accuracy of the
+model, or to reduce the training time. Improving one (eg accuracy) will be at
+the expense of the other (eg training time), so there is a need to manage the
+trade-offs.
+
+For our model, the training time is very long. So the aim of fine tuning is to
+reduce the model training time, and at the same time, not sacrificing too much
+of the accuracy.
+
+As we are using **Train** function in R, the only parameter that we can change
+is **mtry (number of predictors sampled for spliting at each node)** through the
+**tuneGrid** parameter in the **Train** function. Since there are a total of
+`r ncol(Train)-1` predictor variables, **mtry** can range from 1 to `r ncol(Train)-1`.
+
+As mentioned in the earlier section, since the accuracy between the different
+values of mtry are more or less the same, mtry of 2 was chosen to reduce the
+model training time (I didn't choose mtry = 1 as I think it is too small).
+With mtry of 2, the accuracy of the final model when tested with the validation
+data set is **`r round(ModelFit3_Acc,4)`**. The training time is shortened to
+**`r ModelFit3$times$everything[3]` seconds (elapsed time)**.
+
+Since the accuracy is still good, this model (with mtry = 2) will be selected
+as the final model.
+
+&nbsp;
+
+### 6. Testing with Testing Data Set.
+
+With the final model selected, we will use the testing data set (that we have not
+used so far) to perform our final model accuracy estimation. This estimation
+will be close to the actual Out-of-Sample accuracy (or error), since the testing
+data set has not be used in anyway during the training of the model.
+
+For comparison purposes, we will also run test testing data set with the intial
+model that is trained with all the `r ncol(Train)-1` predictors, to get a feel
+of what will be the difference between the accuracy of the model trained with
+mtry = 2 and mtry = `r ncol(Train)-1`.
+
+
+```{r FinalTest, eval=TRUE, echo=FALSE}
+
+# Final Testing with testing data set.
+
+# Test with mtry = 2 model.
+cM_final1 <- confusionMatrix(predict(ModelFit3,Test),Test$classe)
+ModelFit3_F_Acc <- cM_final1$overall[1] # Get accuracy for Model 2_M
+
+# Test with mtry = max model.
+cM_final2 <- confusionMatrix(predict(ModelFit2,Test),Test$classe)
+ModelFit2_F_Acc <- cM_final2$overall[1] # Get accuracy for Model 2
+```
+
+
+Using the testing data set, the accuracy of the final model (with mtry = 2) is
+**`r round(ModelFit3_F_Acc,4)`** and with mtry = `r ncol(Train)-1` is
+**`r round(ModelFit2_F_Acc,4)`**. We can see that both accuracy are about the
+same. This is consistant with the results obtained during cross validation with
+the validation data set, i.e. the accuracy between the 2 models were almost the
+same too.
+
+**We will expect the Out-of-Sample accuracy (or Out-of-Sample error) when the final
+model is used to predict new set of data to be around this value.**
+
+&nbsp;
+
+### 7. Final Assignment.
+
+The final task for this project is to perform classification on the data set
+in the file "pml-testing.csv". (The outcome will be used to fill in the 2nd part
+of this project and will not be shown here.)
+
+
+```{r Classification, eval=TRUE, echo=FALSE}
+
+# Classification with data set in "pml-testing.csv".
+prediction <- predict(ModelFit3,Final_Test)
+
+# Writting predictions into different files.
+for(i in 1:length(prediction)){
+        filename = paste0("./data/problem_id_",i,".txt")
+        write.table(prediction[i],file=filename,quote=FALSE,
+                    row.names=FALSE,col.names=FALSE)
+}
+```
+
+&nbsp;
+
+### Appendix - Session Info
+
+
+```{r SessonInfo, eval=TRUE, echo=FALSE}
+sessionInfo()
+```
